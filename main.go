@@ -19,7 +19,7 @@ import (
 /* gene pool from which solutions are drawn */
 var genes = []string{
 	"IN",
-	"ENGINR",
+	"ENGINER",
 	"MBERS",
 	"LNKD",
 	"RD",
@@ -29,14 +29,14 @@ var genes = []string{
 
 /* regular expressions that must be satisfied as constraints */
 var expressions = []string{
-	"[LINKED]*IN",
-	"(ENG|INE|E|R)*",
-	"([MBERS]*)/1",
-	".(LN|K|D)*",
-	"R+D",
-	"[^WORK]*ING?",
-	".*[IN].*",
-	"C{0}N[NECT]*"}
+	`[LINKED]*IN`,
+	`(ENG|INE|E|R)*`,
+	`([MBERS]*)`,
+	`.(LN|K|D)*`,
+	`R+D`,
+	`[^WORK]*ING?`,
+	`.*[IN].*`,
+	`C{0}N[NECT]*`}
 
 /* sequences of the solutions that must be checked against the constraints */
 var sequences = [][][]int{
@@ -112,6 +112,18 @@ func MakeSolution() Solution {
 
 }
 
+/* clone solution */
+func CloneSolution(s Solution) Solution {
+
+	c := MakeSolution()
+	c.F = s.F
+	c.G = s.G
+	c.S = s.S
+
+	return c
+
+}
+
 /* spawn new random solution */
 func Spawn(wg sync.WaitGroup) Solution {
 
@@ -123,11 +135,51 @@ func Spawn(wg sync.WaitGroup) Solution {
 
 		for j := 0; j < 4; j++ {
 
-			// TODO FIGURE OUT HOW TO INDEX THIS....
-			all := genes[i] + genes[j+4]
-			ind := Random(0, len(all))
-			s.G[i][j] = string(all[ind])
+			rnd := Random(0, 2)
 
+			switch rnd {
+
+			case 0:
+
+				if i == 0 {
+					subset := genes[0]
+					ind := Random(0, len(subset))
+					s.G[i][j] = string(subset[ind])
+				} else if i == 1 {
+					subset := genes[1]
+					ind := Random(0, len(subset))
+					s.G[i][j] = string(subset[ind])
+				} else if i == 2 {
+					subset := genes[2]
+					ind := Random(0, len(subset))
+					s.G[i][j] = string(subset[ind])
+				} else if i == 3 {
+					subset := genes[3]
+					ind := Random(0, len(subset))
+					s.G[i][j] = string(subset[ind])
+				}
+
+			case 1:
+
+				if j == 0 {
+					subset := genes[4]
+					ind := Random(0, len(subset))
+					s.G[i][j] = string(subset[ind])
+				} else if j == 1 {
+					subset := genes[5]
+					ind := Random(0, len(subset))
+					s.G[i][j] = string(subset[ind])
+				} else if j == 2 {
+					subset := genes[6]
+					ind := Random(0, len(subset))
+					s.G[i][j] = string(subset[ind])
+				} else if j == 3 {
+					subset := genes[7]
+					ind := Random(0, len(subset))
+					s.G[i][j] = string(subset[ind])
+				}
+
+			}
 		}
 
 	}
@@ -164,7 +216,7 @@ func Spawner(q chan Solution, wg sync.WaitGroup) chan Solution {
 /* evaluate solution Fitness */
 func (s Solution) Fitness() {
 
-	for _, seq := range sequences {
+	for N, seq := range sequences {
 
 		var test string = ""
 
@@ -174,18 +226,44 @@ func (s Solution) Fitness() {
 
 		}
 
+		// DEBUG
+		if N == 4 {
+			fmt.Println(test)
+		}
+
 		for e, exp := range expressions {
 
 			pattern := regexp.MustCompile(exp)
+			pattern.Longest()
 			match := pattern.FindString(test)
 
-			if utf8.RuneCountInString(match) < len(test) {
+			if utf8.RuneCountInString(match) < 4 {
 
 				s.F[e] = false
 
 			} else {
 
 				s.F[e] = true
+
+				/* Insert eggregious hack to overcome the go-lang regexp library's
+				failure to support backreferencing expressions a-la '/1' */
+
+				if e == 2 {
+
+					set1, _ := regexp.MatchString(string(match[0]), string(match[2]))
+					set2, _ := regexp.MatchString(string(match[1]), string(match[3]))
+
+					if set1 && set2 {
+
+						s.F[e] = true
+
+					} else {
+
+						s.F[e] = false
+
+					}
+
+				}
 
 			}
 
@@ -197,7 +275,7 @@ func (s Solution) Fitness() {
 
 		if b {
 
-			s.S++
+			s.S += 1
 
 		}
 
@@ -208,22 +286,81 @@ func (s Solution) Fitness() {
 }
 
 /* mutate solution and retain if fitness improvement */
-func (s Solution) Mutate() {
+func Mutate(s Solution) Solution {
 
-	n := s
+	n := CloneSolution(s)
 	i := Random(0, 4)
 	j := Random(0, 4)
-	ind := Random(0, len(genes[i+j]))
-	n.G[i][j] = string(genes[i+j][ind])
+
+	rnd := Random(0, 2)
+
+	switch rnd {
+
+	case 0:
+
+		if j == 0 {
+			subset := genes[4]
+			ind := Random(0, len(subset))
+			n.G[i][j] = string(subset[ind])
+		} else if j == 1 {
+			subset := genes[5]
+			ind := Random(0, len(subset))
+			n.G[i][j] = string(subset[ind])
+		} else if j == 2 {
+			subset := genes[6]
+			ind := Random(0, len(subset))
+			n.G[i][j] = string(subset[ind])
+		} else if j == 3 {
+			subset := genes[7]
+			ind := Random(0, len(subset))
+			n.G[i][j] = string(subset[ind])
+		}
+
+	case 1:
+
+		if i == 0 {
+			subset := genes[0]
+			ind := Random(0, len(subset))
+			n.G[i][j] = string(subset[ind])
+		} else if i == 1 {
+			subset := genes[1]
+			ind := Random(0, len(subset))
+			n.G[i][j] = string(subset[ind])
+		} else if i == 2 {
+			subset := genes[2]
+			ind := Random(0, len(subset))
+			n.G[i][j] = string(subset[ind])
+		} else if i == 3 {
+			subset := genes[3]
+			ind := Random(0, len(subset))
+			n.G[i][j] = string(subset[ind])
+		}
+
+	}
+
 	n.Fitness()
 
 	if n.S > s.S {
 
-		s = n
+		return n
+
+	} else {
+
+		return s
 
 	}
 
-	return
+}
+
+/* view phenotype of candidate solution */
+func (s Solution) Phenotype() {
+
+	fmt.Println(s.U.String())
+	fmt.Println(s.G[3])
+	fmt.Println(s.G[2])
+	fmt.Println(s.G[1])
+	fmt.Println(s.G[0])
+	fmt.Println(s.F)
 
 }
 
@@ -233,7 +370,7 @@ func Mutator(q chan Solution) chan Solution {
 	for {
 
 		s := <-q
-		s.Mutate()
+		s = Mutate(s)
 
 		select {
 
@@ -248,16 +385,6 @@ func Mutator(q chan Solution) chan Solution {
 	}
 
 	return q
-
-}
-
-/* view phenotype of candidate solution */
-func (s Solution) Phenotype() {
-
-	fmt.Println(s.G[0])
-	fmt.Println(s.G[1])
-	fmt.Println(s.G[2])
-	fmt.Println(s.G[3])
 
 }
 

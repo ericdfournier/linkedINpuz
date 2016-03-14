@@ -73,6 +73,18 @@ func Random(min, max int) int {
 
 }
 
+/* view phenotype of candidate solution */
+func (s Solution) Phenotype() {
+
+	fmt.Println(s.U.String())
+	fmt.Println(s.G[3])
+	fmt.Println(s.G[2])
+	fmt.Println(s.G[1])
+	fmt.Println(s.G[0])
+	fmt.Println(s.F)
+
+}
+
 /* make function for new solution struct */
 func MakeParameters() Parameters {
 
@@ -184,7 +196,7 @@ func Spawn(wg sync.WaitGroup) Solution {
 
 	}
 
-	s.Fitness()
+	s = Fitness(s)
 
 	return s
 
@@ -214,9 +226,9 @@ func Spawner(q chan Solution, wg sync.WaitGroup) chan Solution {
 }
 
 /* evaluate solution Fitness */
-func (s Solution) Fitness() {
+func Fitness(s Solution) Solution {
 
-	for N, seq := range sequences {
+	for _, seq := range sequences {
 
 		var test string = ""
 
@@ -224,11 +236,6 @@ func (s Solution) Fitness() {
 
 			test += s.G[ind[0]][ind[1]]
 
-		}
-
-		// DEBUG
-		if N == 4 {
-			fmt.Println(test)
 		}
 
 		for e, exp := range expressions {
@@ -245,7 +252,7 @@ func (s Solution) Fitness() {
 
 				s.F[e] = true
 
-				/* Insert eggregious hack to overcome the go-lang regexp library's
+				/* Insert eggregious hack to overcome the go-lang regexp package's
 				failure to support backreferencing expressions a-la '/1' */
 
 				if e == 2 {
@@ -271,6 +278,7 @@ func (s Solution) Fitness() {
 
 	}
 
+	// THIS PART IS NOT WORKING FOR SOME REASON
 	for _, b := range s.F {
 
 		if b {
@@ -281,7 +289,7 @@ func (s Solution) Fitness() {
 
 	}
 
-	return
+	return s
 
 }
 
@@ -338,7 +346,7 @@ func Mutate(s Solution) Solution {
 
 	}
 
-	n.Fitness()
+	n = Fitness(n)
 
 	if n.S > s.S {
 
@@ -352,29 +360,16 @@ func Mutate(s Solution) Solution {
 
 }
 
-/* view phenotype of candidate solution */
-func (s Solution) Phenotype() {
-
-	fmt.Println(s.U.String())
-	fmt.Println(s.G[3])
-	fmt.Println(s.G[2])
-	fmt.Println(s.G[1])
-	fmt.Println(s.G[0])
-	fmt.Println(s.F)
-
-}
-
 /* worker pool function to parallelize spawning process */
 func Mutator(q chan Solution) chan Solution {
 
 	for {
 
 		s := <-q
-		s = Mutate(s)
 
 		select {
 
-		case q <- s:
+		case q <- Mutate(s):
 
 		default:
 
@@ -407,14 +402,50 @@ func Initialize(p Parameters) chan Solution {
 
 }
 
-/* perform evolutionary iteration on candidate solutions */
-func Evolve(q chan Solution) chan Solution {
+/* perform intersection on two solutions for gene exchange */
+func Intersect(s1, s2 Solution) (o1, o2 Solution) {
 
-	return q
+	iR := Random(0, 4)
+	jR := Random(0, 4)
+	c := MakeSolution()
+
+	for i := 0; i < 4; i++ {
+
+		for j := 0; j < 4; j++ {
+
+			if i <= iR && j <= jR {
+
+				c.G[i][j] = s1.G[i][j]
+
+			} else {
+
+				c.G[i][j] = s2.G[i][j]
+
+			}
+
+		}
+
+	}
+
+	c = Fitness(c)
+
+	if c.S <= s1.S && c.S > s2.S {
+
+		return s1, c
+
+	} else if c.S > s1.S && c.S <= s2.S {
+
+		return s2, c
+
+	} else {
+
+		return s1, s2
+
+	}
 
 }
 
-/* solve Problem */
+/* solve problem */
 func Solve(p Parameters) {
 
 	q := Initialize(p)
@@ -428,7 +459,8 @@ func Solve(p Parameters) {
 
 		} else {
 
-			q = Evolve(q)
+			//q = Evolve(q)
+			fmt.Println(q)
 
 		}
 

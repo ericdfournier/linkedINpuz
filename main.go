@@ -11,6 +11,7 @@ import (
 	"math/rand"
 	"regexp"
 	"runtime"
+	"sort"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -59,8 +60,8 @@ type Parameters struct {
 /* candidate solution attributes*/
 type Solution struct {
 	G [][]string // Genotype
-	F []bool     // Fitness
-	S int        // Score
+	P []bool     // Phenotype
+	F int        // Fitness
 	U uuid.UUID  // UUID
 }
 
@@ -81,16 +82,35 @@ func (s Solution) Phenotype() {
 	fmt.Println(s.G[2])
 	fmt.Println(s.G[1])
 	fmt.Println(s.G[0])
-	fmt.Println(s.F)
+	fmt.Println(s.P)
+
+}
+
+/* view phenotypes of top solutions */
+func TopPhenotypes(s chan Solution, tF int) {
+
+	var c Solution
+
+	for i := 0; i < cap(s); i++ {
+
+		c = <-s
+
+		if c.F == tF {
+
+			c.Phenotype()
+
+		}
+
+	}
 
 }
 
 /* make function for new solution struct */
 func MakeParameters() Parameters {
 
-	QueueSize := 10000
+	QueueSize := 1000
 	PoolSize := runtime.NumCPU()
-	MaxEvolutions := 1000
+	MaxEvolutions := 100
 
 	return Parameters{
 		Q: QueueSize,
@@ -111,14 +131,14 @@ func MakeSolution() Solution {
 
 	}
 
-	Fitness := make([]bool, 8)
-	Score := 0
+	Phenotype := make([]bool, 8)
+	Fitness := 0
 	UUID := uuid.NewV4()
 
 	return Solution{
 		G: Genotype,
+		P: Phenotype,
 		F: Fitness,
-		S: Score,
 		U: UUID,
 	}
 
@@ -128,18 +148,104 @@ func MakeSolution() Solution {
 func CloneSolution(s Solution) Solution {
 
 	c := MakeSolution()
-	c.F = s.F
+	c.P = s.P
 	c.G = s.G
-	c.S = s.S
+	c.F = s.F
 
 	return c
 
 }
 
-/* spawn new random solution */
-func Spawn(wg sync.WaitGroup) Solution {
+/* evaluate solution Fitness */
+func Fitness(s Solution) Solution {
 
-	defer wg.Done()
+	for _, seq := range sequences {
+
+		var test string = ""
+
+		for _, ind := range seq {
+
+			test += s.G[ind[0]][ind[1]]
+
+		}
+
+		for e, exp := range expressions {
+
+			pattern := regexp.MustCompile(exp)
+			pattern.Longest()
+			match := pattern.FindString(test)
+
+			if utf8.RuneCountInString(match) < 4 {
+
+				s.P[e] = false
+
+			} else {
+
+				s.P[e] = true
+
+				/* Insert eggregious hack to overcome the go-lang regexp package's
+				failure to support backreferencing expressions a-la '/1' */
+
+				if e == 2 {
+
+					set1, _ := regexp.MatchString(string(match[0]), string(match[2]))
+					set2, _ := regexp.MatchString(string(match[1]), string(match[3]))
+
+					if set1 && set2 {
+
+						s.P[e] = true
+
+					} else {
+
+						s.P[e] = false
+
+					}
+
+				}
+
+			}
+
+		}
+
+	}
+
+	s.F = 0
+
+	for _, b := range s.P {
+
+		if b {
+
+			s.F += 1
+
+		}
+
+	}
+
+	return s
+
+}
+
+func TopFitness(s chan Solution) int {
+
+	f := make([]int, cap(s))
+
+	for i := 0; i < cap(s); i++ {
+
+		c := <-s
+		f[i] = c.F
+		s <- c
+
+	}
+
+	sort.Ints(f)
+	tF := f[len(f)-1]
+
+	return tF
+
+}
+
+/* spawn new random solution */
+func Spawn() Solution {
 
 	s := MakeSolution()
 
@@ -203,93 +309,31 @@ func Spawn(wg sync.WaitGroup) Solution {
 }
 
 /* worker pool function to parallelize spawning process */
-func Spawner(q chan Solution, wg sync.WaitGroup) chan Solution {
+func Spawner(q chan Solution, t chan bool, wg *sync.WaitGroup) {
 
-	wg.Add(cap(q))
+	defer wg.Done()
 
 	for {
 
 		select {
 
-		case q <- Spawn(wg):
+		case _, ok := <-t:
 
-		default:
+			if !ok {
 
-			break
-
-		}
-
-	}
-
-	return q
-
-}
-
-/* evaluate solution Fitness */
-func Fitness(s Solution) Solution {
-
-	for _, seq := range sequences {
-
-		var test string = ""
-
-		for _, ind := range seq {
-
-			test += s.G[ind[0]][ind[1]]
-
-		}
-
-		for e, exp := range expressions {
-
-			pattern := regexp.MustCompile(exp)
-			pattern.Longest()
-			match := pattern.FindString(test)
-
-			if utf8.RuneCountInString(match) < 4 {
-
-				s.F[e] = false
-
-			} else {
-
-				s.F[e] = true
-
-				/* Insert eggregious hack to overcome the go-lang regexp package's
-				failure to support backreferencing expressions a-la '/1' */
-
-				if e == 2 {
-
-					set1, _ := regexp.MatchString(string(match[0]), string(match[2]))
-					set2, _ := regexp.MatchString(string(match[1]), string(match[3]))
-
-					if set1 && set2 {
-
-						s.F[e] = true
-
-					} else {
-
-						s.F[e] = false
-
-					}
-
-				}
+				return
 
 			}
 
-		}
+			q <- Spawn()
 
-	}
+		default:
 
-	// THIS PART IS NOT WORKING FOR SOME REASON
-	for _, b := range s.F {
-
-		if b {
-
-			s.S += 1
+			return
 
 		}
 
 	}
-
-	return s
 
 }
 
@@ -299,7 +343,6 @@ func Mutate(s Solution) Solution {
 	n := CloneSolution(s)
 	i := Random(0, 4)
 	j := Random(0, 4)
-
 	rnd := Random(0, 2)
 
 	switch rnd {
@@ -348,7 +391,7 @@ func Mutate(s Solution) Solution {
 
 	n = Fitness(n)
 
-	if n.S > s.S {
+	if n.F > s.F {
 
 		return n
 
@@ -361,44 +404,31 @@ func Mutate(s Solution) Solution {
 }
 
 /* worker pool function to parallelize spawning process */
-func Mutator(q chan Solution) chan Solution {
+func Mutator(q chan Solution, t chan bool, wg *sync.WaitGroup) {
+
+	defer wg.Done()
 
 	for {
 
-		s := <-q
-
 		select {
 
-		case q <- Mutate(s):
+		case _, ok := <-t:
+
+			if !ok {
+
+				return
+
+			}
+
+			q <- Mutate(<-q)
 
 		default:
 
-			break
+			return
 
 		}
 
 	}
-
-	return q
-
-}
-
-/* initialize a new set of candidate solutions */
-func Initialize(p Parameters) chan Solution {
-
-	q := make(chan Solution, p.Q)
-
-	var wg sync.WaitGroup
-
-	for i := 0; i < p.P; i++ {
-
-		go Spawner(q, wg)
-
-	}
-
-	wg.Wait()
-
-	return q
 
 }
 
@@ -429,11 +459,11 @@ func Intersect(s1, s2 Solution) (o1, o2 Solution) {
 
 	c = Fitness(c)
 
-	if c.S <= s1.S && c.S > s2.S {
+	if c.F <= s1.F && c.F > s2.F {
 
 		return s1, c
 
-	} else if c.S > s1.S && c.S <= s2.S {
+	} else if c.F > s1.F && c.F <= s2.F {
 
 		return s2, c
 
@@ -445,22 +475,160 @@ func Intersect(s1, s2 Solution) (o1, o2 Solution) {
 
 }
 
-/* solve problem */
-func Solve(p Parameters) {
+/* worker pool function to parallelize spawning process */
+func Intersector(q chan Solution, t chan bool, wg *sync.WaitGroup) {
 
-	q := Initialize(p)
+	defer wg.Done()
+
+	for {
+
+		select {
+
+		case _, ok := <-t:
+
+			if !ok {
+
+				return
+			}
+
+			s1 := <-q
+			s2 := <-q
+
+			o1, o2 := Intersect(s1, s2)
+
+			q <- o1
+			q <- o2
+
+		default:
+
+			return
+
+		}
+
+	}
+
+}
+
+/* initialize a new set of candidate solutions */
+func Initialize(p Parameters) chan Solution {
+
+	fmt.Println("Initializating...")
+
+	s := make(chan Solution, p.Q)
+
+	st := make(chan bool, p.Q)
+	mt := make(chan bool, p.Q)
+	it := make(chan bool, p.Q)
+
+	var swg, mwg, iwg sync.WaitGroup
+
+	swg.Add(p.P)
+	mwg.Add(p.P)
+	iwg.Add(p.P)
+
+	for i := 0; i < p.Q; i++ {
+
+		st <- true
+		mt <- true
+		it <- true
+
+	}
+
+	for j := 0; j < p.P; j++ {
+
+		go Spawner(s, st, &swg)
+
+	}
+
+	swg.Wait()
+
+	for k := 0; k < p.P; k++ {
+
+		go Mutator(s, mt, &mwg)
+
+	}
+
+	mwg.Wait()
+
+	for r := 0; r < p.P; r++ {
+
+		go Intersector(s, it, &iwg)
+
+	}
+
+	iwg.Wait()
+
+	fmt.Println("Initialization Complete!!!")
+
+	return s
+
+}
+
+func Evolve(s chan Solution, p Parameters) {
+
+	mt := make(chan bool, p.Q)
+	it := make(chan bool, p.Q)
+
+	var mwg, iwg sync.WaitGroup
+
+	mwg.Add(p.P)
+	iwg.Add(p.P)
+
+	for i := 0; i < p.Q; i++ {
+
+		mt <- true
+		it <- true
+
+	}
+
+	for k := 0; k < p.P; k++ {
+
+		go Mutator(s, mt, &mwg)
+
+	}
+
+	mwg.Wait()
+
+	for r := 0; r < p.P; r++ {
+
+		go Intersector(s, it, &iwg)
+
+	}
+
+	iwg.Wait()
+
+}
+
+/* solve problem */
+func Solve() {
+
+	p := MakeParameters()
+	s := Initialize(p)
 
 	for i := 0; i < p.M; i++ {
 
+		tF := TopFitness(s)
+
 		if i == p.M {
 
-			fmt.Println("Process Terminated: Maximum Evolution Count Reached")
+			fmt.Println("Process Terminated: Maximum Evolution Count Reached...")
+			fmt.Println("Top Fitness: ", tF)
+			break
+
+		}
+
+		if tF == 8 {
+
+			TopPhenotypes(s, tF)
+			fmt.Println("Process Terminated: Convergence Achieved")
 			break
 
 		} else {
 
-			//q = Evolve(q)
-			fmt.Println(q)
+			Evolve(s, p)
+			fmt.Println("Evolution ", (i + 1), " Complete...")
+			fmt.Println("Top Fitness: ", tF)
+			TopPhenotypes(s, tF)
 
 		}
 
